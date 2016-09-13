@@ -1230,7 +1230,13 @@ native_handle* Parcel::readNativeHandle() const
 
     for (int i=0 ; err==NO_ERROR && i<numFds ; i++) {
         h->data[i] = dup(readFileDescriptor());
-        if (h->data[i] < 0) err = BAD_VALUE;
+        if (h->data[i] < 0) {
+            for (int j = 0; j < i; j++) {
+                close(h->data[j]);
+            }
+            native_handle_delete(h);
+            return 0;
+        }
     }
     err = read(h->data + numFds, sizeof(int)*numInts);
     if (err != NO_ERROR) {
@@ -1533,14 +1539,8 @@ void Parcel::freeDataNoInit()
         if (mData) {
             LOG_ALLOC("Parcel %p: freeing with %zu capacity", this, mDataCapacity);
             pthread_mutex_lock(&gParcelGlobalAllocSizeLock);
-            if (mDataCapacity <= gParcelGlobalAllocSize) {
-              gParcelGlobalAllocSize = gParcelGlobalAllocSize - mDataCapacity;
-            } else {
-              gParcelGlobalAllocSize = 0;
-            }
-            if (gParcelGlobalAllocCount > 0) {
-              gParcelGlobalAllocCount--;
-            }
+            gParcelGlobalAllocSize -= mDataCapacity;
+            gParcelGlobalAllocCount--;
             pthread_mutex_unlock(&gParcelGlobalAllocSizeLock);
             free(mData);
         }
@@ -1630,7 +1630,7 @@ status_t Parcel::continueWrite(size_t desired)
         binder_size_t* objects = NULL;
 
         if (objectsSize) {
-            objects = (binder_size_t*)calloc(objectsSize, sizeof(binder_size_t));
+            objects = (binder_size_t*)malloc(objectsSize*sizeof(binder_size_t));
             if (!objects) {
                 free(data);
 
@@ -1701,7 +1701,6 @@ status_t Parcel::continueWrite(size_t desired)
                 pthread_mutex_lock(&gParcelGlobalAllocSizeLock);
                 gParcelGlobalAllocSize += desired;
                 gParcelGlobalAllocSize -= mDataCapacity;
-                gParcelGlobalAllocCount++;
                 pthread_mutex_unlock(&gParcelGlobalAllocSizeLock);
                 mData = data;
                 mDataCapacity = desired;
